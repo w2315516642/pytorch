@@ -1484,6 +1484,8 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
 
+    mutation_phases: bool = False
+
 
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
 

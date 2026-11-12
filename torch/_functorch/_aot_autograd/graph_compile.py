@@ -204,6 +204,15 @@ def aot_stage1_graph_capture(
     aot_state: AOTState,
     orig_flat_fn: FlatFn,
 ) -> AOTGraphCapture:
+    from .input_mutation_phases import capture_mutation_phases
+
+    phases = capture_mutation_phases(aot_state, orig_flat_fn)
+    if phases is not None:
+        return AOTGraphCapture(
+            [], phases, aot_state.flat_args, aot_state.flat_args_descs, None,
+            mutation_phases=True,
+        )
+
     # NB: flat_fn at this point coincides with the initial info from forward
     # metadata collection returning a list[Tensor].  We are now going to
     # augment the output to return a tuple[list[Tensor], list[AOTOutput]] and
@@ -347,6 +356,14 @@ def aot_stage2_compile(
     # pyrefly: ignore [implicit-any]
     inference_compiler: Callable | None = None,
 ) -> DispatchReturn:
+    if aot_graph_capture.mutation_phases:
+        from .input_mutation_phases import compile_mutation_phases
+
+        return compile_mutation_phases(
+            aot_state, aot_graph_capture.graph_module,
+            partition_fn, fw_compiler, bw_compiler, inference_compiler,
+        ), aot_state.fw_metadata
+
     if bw_compiler is None:
         bw_compiler = fw_compiler
     if inference_compiler is None:

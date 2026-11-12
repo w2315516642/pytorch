@@ -3407,11 +3407,15 @@ def _compile_fx_main(
                     num_orig_model_outputs = get_num_model_outputs(model_)
                 else:
                     num_orig_model_outputs = get_num_model_outputs(gm)
+                phase_num_inputs, num_orig_model_outputs = gm.meta.get(
+                    "aot_input_mutation_phase",
+                    (num_example_inputs, num_orig_model_outputs),
+                )
                 return compile_fx_forward(
                     gm,
                     example_inputs,
                     num_orig_model_outputs=num_orig_model_outputs,
-                    num_example_inputs=num_example_inputs,
+                    num_example_inputs=phase_num_inputs,
                     compiler_config_extra=compiler_config_extra,
                     inner_compile=inner_compile,
                     is_inference=is_inference,

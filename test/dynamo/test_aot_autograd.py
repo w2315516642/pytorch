@@ -42,7 +42,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     preserves_device_selection,
 )
-from torch.testing._internal.common_utils import compare_equal_outs_and_grads
+from torch.testing._internal.common_utils import compare_equal_outs_and_grads, parametrize
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -2225,6 +2225,101 @@ class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
                 for node in outputs
             )
         )
+
+
+    def _check_retained_grad(self, fn, device, backend, exercise=None, retain_after=False):
+        from functorch.compile import aot_function, nop
+
+        def run(call):
+            leaf = torch.arange(1, 7, device=device, dtype=torch.float64)
+            leaf = leaf.reshape(2, 3).requires_grad_()
+            x = leaf * 2
+            if not retain_after:
+                x.retain_grad()
+            y = call(x)
+            if retain_after:
+                x.retain_grad()
+            result = exercise(x, y) if exercise else y.sum().backward()
+            return y, result, x.grad, leaf.grad
+
+        compiled = (
+            aot_function(fn, fw_compiler=nop) if backend == "aot_function"
+            else torch.compile(fn, backend=backend, fullgraph=True)
+        )
+        self.assertEqual(run(compiled), run(fn))
+
+    @parametrize("backend", ["aot_eager", "inductor", "aot_function"])
+    @parametrize("retain_after", [False, True])
+    def test_retained_grad_input_mutation(self, device, backend, retain_after):
+        def fn(x):
+            x.mul_(3)
+            return x.square()
+
+        def backward(x, y):
+            y.sum().backward(retain_graph=True)
+            first = x.grad.clone()
+            (y.sum() + x.sin().sum()).backward()
+            return first
+
+        self._check_retained_grad(fn, device, backend, backward, retain_after)
+
+    @parametrize("backend", ["aot_eager", "inductor", "aot_function"])
+    def test_retained_grad_queries(self, device, backend):
+        def fn(x):
+            x.mul_(3)
+            return x.square()
+
+        def backward(x, y):
+            grad = torch.autograd.grad(y.sum(), x, retain_graph=True)[0]
+            y.sum().backward(inputs=(x,))
+            return grad
+
+        self._check_retained_grad(fn, device, backend, backward)
+
+    @parametrize("backend", ["aot_eager", "inductor", "aot_function"])
+    def test_retained_grad_hook(self, device, backend):
+        def fn(x):
+            x.mul_(3)
+            return x.square()
+
+        def backward(x, y):
+            seen = []
+            x.register_hook(lambda grad: seen.append(grad.clone()) or grad * 2)
+            y.sum().backward()
+            return seen
+
+        self._check_retained_grad(fn, device, backend, backward)
+
+    @parametrize("backend", ["aot_eager", "inductor", "aot_function"])
+    @parametrize("grad_enabled", [False, True])
+    def test_retained_grad_later_mutation(self, device, backend, grad_enabled):
+        def fn(x):
+            x.mul_(3)
+            return x * 4
+
+        def backward(x, y):
+            with torch.set_grad_enabled(grad_enabled):
+                x.add_(1)
+            y.sum().backward()
+
+        self._check_retained_grad(fn, device, backend, backward)
+
+    @parametrize("backend", ["aot_eager", "inductor", "aot_function"])
+    def test_retained_grad_view_mutation(self, device, backend):
+        def fn(x):
+            x.view(-1).mul_(3)
+            return x.square()
+
+        self._check_retained_grad(fn, device, backend)
+
+    def test_retained_grad_metadata_mutation(self, device):
+        def fn(x):
+            x.transpose_(0, 1)
+            x.mul_(3)
+            return x.square()
+
+        self._check_retained_grad(fn, device, "aot_function", retain_after=True)
+
 
 
 instantiate_device_type_tests(AotAutogradFallbackTestsDevice, globals())

@@ -79,15 +79,6 @@ def capture_mutation_phases(
     return split
 
 
-class _CompiledPhase(torch.nn.Module):
-    def __init__(self, compiled: Callable[..., Any]) -> None:
-        super().__init__()
-        self.compiled = compiled
-
-    def forward(self, *args: Any) -> Any:
-        return self.compiled(*args)
-
-
 def compile_mutation_phases(
     state: AOTState,
     split: torch.fx.GraphModule,
@@ -125,7 +116,7 @@ def compile_mutation_phases(
                     ignore_shape_env=state.aot_config.ignore_shape_env,
                 )
                 result = compiled(*args, **kwargs)
-            self.module.set_submodule(target, _CompiledPhase(compiled))
+            submod._compiled_call_impl = compiled
             return result
 
     CompilePhases(split).run(*state.flat_args)
